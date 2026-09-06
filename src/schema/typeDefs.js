@@ -19,6 +19,9 @@ export const typeDefs = gql`
     At least one of query or semanticQuery must be non-empty.
     """
     findPartners(query: PartnerSearchInput!): HybridSearchResult!
+    latestTemperature(userId: ID): TemperatureReading
+    temperatureHistory(userId: ID, from: String!, to: String!): [TemperatureReading!]!
+    temperatureTrends(userId: ID, period: String, unit: TemperatureUnit): TemperatureTrend!
   }
 
   """
@@ -128,6 +131,55 @@ export const typeDefs = gql`
     steps: StepsMetric
     bloodPressure: BloodPressureMetric
     sleep: SleepMetric!
+    temperature: TemperatureMetric
+  }
+
+  type TemperatureMetric {
+    value: Float!
+    unit: String!
+    status: String!
+    statusMessage: String!
+  }
+
+  enum TemperatureUnit {
+    CELSIUS
+    FAHRENHEIT
+  }
+
+  enum TemperatureStatus {
+    HYPOTHERMIA
+    NORMAL
+    FEVER
+    HIGH_FEVER
+  }
+
+  type TemperatureReading {
+    id: ID!
+    userId: ID!
+    timestamp: String!
+    value: Float!
+    unit: TemperatureUnit!
+    normalizedValueCelsius: Float!
+    status: TemperatureStatus!
+    sourceDeviceId: String
+    measurementMethod: String
+  }
+
+  type TemperatureTrendPoint {
+    timestamp: String!
+    min: Float!
+    max: Float!
+    avg: Float!
+    sampleCount: Int!
+  }
+
+  type TemperatureTrend {
+    period: String!
+    unit: TemperatureUnit!
+    dataPoints: [TemperatureTrendPoint!]!
+    overallAvg: Float!
+    overallMin: Float!
+    overallMax: Float!
   }
 
   type HeartRateMetric {

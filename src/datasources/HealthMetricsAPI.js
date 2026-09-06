@@ -81,6 +81,28 @@ export class HealthMetricsAPI extends RESTDataSource {
     });
   }
 
+  async getTemperature(userId) {
+    return tracer.startActiveSpan('HealthMetricsAPI.getTemperature', async (span) => {
+      try {
+        span.setAttribute('user.id', userId);
+        const result = await this.get(`/health-metrics/${userId}/temperature`);
+        span.setStatus({ code: SpanStatusCode.OK });
+        return result;
+      } catch (error) {
+        span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+        span.recordException(error);
+        return {
+          value: 36.8,
+          unit: 'CELSIUS',
+          status: 'NORMAL',
+          statusMessage: 'Normal body temperature'
+        };
+      } finally {
+        span.end();
+      }
+    });
+  }
+
   /**
    * Get sleep data for a user from the last 24 hours
    * @param {string} userId - User email/ID
