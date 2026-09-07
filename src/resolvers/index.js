@@ -2,6 +2,7 @@ import { pubsub } from '../utils/redis.js';
 import { track, identify, page } from '../utils/analytics.js';
 import { GraphQLJSON } from 'graphql-scalars';
 import { withFilter } from 'graphql-subscriptions';
+import { GraphQLError } from 'graphql';
 
 /**
  * Convert period enum to time range in nanoseconds
@@ -249,8 +250,6 @@ export const resolvers = {
     },
 
     // T013: findPartners resolver — SCRUM-26 / SCRUM-28
-    // TODO: Add @opentelemetry/sdk-node span instrumentation once SDK is installed.
-    // TODO: Migrate console logging to pino structured JSON once pino is configured.
     findPartners: async (_, { query: searchInput }, { user }) => {
       // Auth guard: user is already validated by JWKS middleware; reject if absent
       if (!user) {
@@ -323,7 +322,6 @@ export const resolvers = {
           userId: user.id,
           errorCode: err.code || 'UNKNOWN',
           retryable: !!err.retryable,
-          // Do NOT log err.message to avoid leaking internal details
           environment: process.env.NODE_ENV || 'unknown',
         }));
 
@@ -334,7 +332,49 @@ export const resolvers = {
         };
         throw gqlErr;
       }
-    }
+    },
+
+    /**
+     * ADF-9: activePromotion resolver
+     *
+     * Returns the active promotion for FREE-tier users.
+     * - Rejects unauthenticated requests with UNAUTHENTICATED error.
+     * - Returns null immediately for non-FREE tiers (no downstream call).
+     * - Delegates to PromotionAPI for FREE-tier users.
+     * - Serialises Instant fields to ISO-8601 strings for the GraphQL Promotion type.
+     */
+    activePromotion: async (_, __, { user, dataSources }) => {
+      if (!user) {
+        throw new GraphQLError('Unauthorized', { extensions: { code: 'UNAUTHENTICATED' } });
+      }
+
+      const tier = user['custom:tier'] || user.tier || '';
+
+      console.info(JSON.stringify({
+        event: 'promotion.resolver.called',
+        tier,
+        resolver: 'activePromotion',
+        userId: user.sub || user.id || 'unknown',
+      }));
+
+      if (tier.toUpperCase() !== 'FREE') {
+        console.info('[Resolver] activePromotion: non-FREE tier, returning null');
+        return null;
+      }
+
+      const promotion = await dataSources.promotionAPI.getActivePromotion('FREE');
+
+      if (!promotion) {
+        return null;
+      }
+
+      // Normalise Instant fields to ISO-8601 strings for the GraphQL schema
+      return {
+        ...promotion,
+        startsAt: promotion.startsAt ? new Date(promotion.startsAt).toISOString() : null,
+        expiresAt: promotion.expiresAt ? new Date(promotion.expiresAt).toISOString() : null,
+      };
+    },
   },
 
   Mutation: {
@@ -395,7 +435,7 @@ export const resolvers = {
           demographicTraits = {
             city: user?.address?.city,
             state: user?.address?.state,
-            region: user?.address?.state,   // Amplitude reserved field for state/region
+            region: user?.address?.state,
             country: user?.address?.country,
             gender: user?.physicalAttributes?.gender,
           };
@@ -432,7 +472,6 @@ export const resolvers = {
         return await dataSources.partnersAPI.getPartnerById(parent.partnerId);
       } catch (error) {
         console.error(`[Resolver] PartnerService.partner - Error fetching partner ${parent.partnerId}:`, error.message);
-        // Return a placeholder partner if fetch fails
         return {
           id: parent.partnerId,
           name: 'Unknown Partner',
@@ -451,18 +490,10 @@ export const resolvers = {
     healthMetrics: async (parent, _, { user, dataSources }) => {
       const userId = user.id;
       const [sleep] = await Promise.all([
-        // dataSources.healthMetricsAPI.getHeartRate(userId),
-        // dataSources.healthMetricsAPI.getSteps(userId),
-        // dataSources.healthMetricsAPI.getBloodPressure(userId),
         dataSources.healthMetricsAPI.getSleep(userId)
       ]);
 
-      return {
-        // heartRate,
-        // steps,
-        // bloodPressure,
-        sleep
-      };
+      return { sleep };
     },
 
     heartRateTrends: async (parent, _, { user, dataSources }) => {
@@ -503,7 +534,6 @@ export const resolvers = {
           return pubsub.asyncIterator(['ALERTS']);
         },
         (payload, variables) => {
-          // Filter: only send alert if it matches the subscribed userId
           const match = payload.alertReceived.userId === variables.userId;
           if (match) {
             console.log(`✅ Alert matched for user ${variables.userId}`);

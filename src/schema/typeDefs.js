@@ -22,6 +22,42 @@ export const typeDefs = gql`
     latestTemperature(userId: ID): TemperatureReading
     temperatureHistory(userId: ID, from: String!, to: String!): [TemperatureReading!]!
     temperatureTrends(userId: ID, period: String, unit: TemperatureUnit): TemperatureTrend!
+    """
+    Returns the currently active promotional ribbon for the authenticated user's tier.
+    Returns null when no promotion is active, when the user is PREMIUM, or when the
+    promotion window has expired. Server response is cached for 60 seconds (FR-007a).
+    Requires a valid Keycloak-issued JWT in the Authorization header.
+    """
+    activePromotion: Promotion @cacheControl(maxAge: 60)
+  }
+
+  """
+  A promotional ribbon displayed to FREE-tier users on Dashboard, Metrics, and Goals screens.
+  All string fields are validated to their maximum lengths server-side before persistence.
+  """
+  type Promotion {
+    "Unique identifier for the promotion (UUID)."
+    id: ID!
+    "Promotion headline. Max 80 characters."
+    title: String!
+    "Optional short badge label (e.g. \"SAVE 20%\"). Max 20 characters."
+    badgeLabel: String
+    "Optional body copy shown beneath the headline."
+    bodyText: String
+    "CTA button label. Max 30 characters."
+    ctaLabel: String!
+    "CTA destination URL. Max 2048 characters."
+    ctaUrl: String!
+    "Ribbon background colour as a CSS hex string (e.g. \"#1A73E8\")."
+    backgroundColour: String!
+    "Ribbon foreground/text colour as a CSS hex string (e.g. \"#FFFFFF\")."
+    textColour: String!
+    "Target user tier. Currently always \"FREE\"."
+    targetTier: String!
+    "ISO-8601 UTC timestamp — when this promotion becomes visible."
+    startsAt: String!
+    "ISO-8601 UTC timestamp — when this promotion expires."
+    expiresAt: String!
   }
 
   """
