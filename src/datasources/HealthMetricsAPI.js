@@ -91,12 +91,61 @@ export class HealthMetricsAPI extends RESTDataSource {
       } catch (error) {
         span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
         span.recordException(error);
-        return {
-          value: 36.8,
-          unit: 'CELSIUS',
-          status: 'NORMAL',
-          statusMessage: 'Normal body temperature'
-        };
+        // T013: removed hardcoded fallback — surface the error so callers can handle it
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  /**
+   * Get paginated temperature readings for a user (T011).
+   * Calls GET /metrics/temperature/readings on charting-api via HEALTH_METRICS_API_URL.
+   * @param {string} userId - User ID
+   * @param {number|null} from - Start epoch ms (optional)
+   * @param {number|null} to - End epoch ms (optional)
+   * @returns {Promise<Array>} Array of TemperatureReading objects
+   */
+  async getTemperatureHistory(userId, from, to) {
+    return tracer.startActiveSpan('HealthMetricsAPI.getTemperatureHistory', async (span) => {
+      try {
+        span.setAttribute('user.id', userId);
+
+        const params = new URLSearchParams({ userId, size: '50' });
+        if (from != null) params.set('from', String(from));
+        if (to != null) params.set('to', String(to));
+
+        const response = await this.get(`/metrics/temperature/readings?${params.toString()}`);
+
+        console.info(JSON.stringify({
+          audit_event: 'temperature.history.read',
+          accessor_id: userId,
+          affected_user_id: userId,
+          record_count: response?.data?.length ?? 0,
+          timestamp: new Date().toISOString()
+        }));
+
+        // Map charting-api snake_case to TemperatureReading GraphQL camelCase shape
+        const readings = (response?.data || []).map(r => ({
+          id: r.request_id || null,
+          userId: r.user_id,
+          timestamp: r.time,
+          value: r.metric_value,
+          unit: r.unit,
+          normalizedValueCelsius: r.normalized_value_celsius,
+          status: r.status || null,
+          sourceDeviceId: r.device_id || null,
+          measurementMethod: r.measurement_method || null
+        }));
+
+        span.setAttribute('temperature.history.count', readings.length);
+        span.setStatus({ code: SpanStatusCode.OK });
+        return readings;
+      } catch (error) {
+        span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+        span.recordException(error);
+        throw error;
       } finally {
         span.end();
       }
